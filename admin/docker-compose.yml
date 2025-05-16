@@ -1,0 +1,129 @@
+version: '3.8'
+
+services:
+  # MySQL服务
+  mysql:
+    image: mysql:5.7.36
+    container_name: mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_ROOT_HOST: '%'
+#      MYSQL_DATABASE: app_db
+#      MYSQL_USER: app_user
+#      MYSQL_PASSWORD: user123
+    volumes:
+      - ./mysql/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./mysql/init_admin.sql:/docker-entrypoint-initdb.d/init_admin.sql
+      - mysql_data:/var/lib/mysql
+    networks:
+      - app-network
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 10s
+      retries: 5
+
+  # Redis服务
+  redis:
+    image: redis:6.2-alpine
+    container_name: redis
+    command: redis-server --requirepass 123456
+    volumes:
+      - redis_data:/data
+    networks:
+      - app-network
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Nacos服务
+  nacos:
+    image: nacos/nacos-server:v2.1.2
+    container_name: nacos2
+    environment:
+      MODE: standalone
+      TIME_ZONE: Asia/Shanghai
+#      SPRING_DATASOURCE_PLATFORM: mysql
+#      MYSQL_SERVICE_HOST: mysql
+#      MYSQL_SERVICE_DB_NAME: nacos_config
+#      MYSQL_SERVICE_USER: root
+#      MYSQL_SERVICE_PASSWORD: root123
+    networks:
+      - app-network
+    ports:
+      - "8848:8848"
+      - "9848:9848"
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  # Spring Boot应用
+  gateway:
+    build:
+      context: .
+      dockerfile: app/gateway/Dockerfile
+    ports:
+      - "8000:8000"
+    networks:
+      - app-network
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nacos:
+        condition: service_started
+
+  aggregate:
+    build:
+      context: .
+      dockerfile: app/aggregate/Dockerfile  # 方案二路径
+    ports:
+      - "8003:8003"
+    networks:
+      - app-network
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nacos:
+        condition: service_started
+#  app:
+#    build: ./springboot-app
+#    container_name: app
+#    environment:
+#      SPRING_PROFILES_ACTIVE: prod
+#      SPRING_CLOUD_NACOS_SERVER-ADDR: nacos2:8848
+#      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/app_db?useSSL=false
+#      SPRING_DATASOURCE_USERNAME: app_user
+#      SPRING_DATASOURCE_PASSWORD: user123
+#      SPRING_REDIS_HOST: redis
+#      SPRING_REDIS_PASSWORD: 123456
+#    networks:
+#      - app-network
+#    ports:
+#      - "8000:8000"
+#      - "8003:8003"
+#    depends_on:
+#      mysql:
+#        condition: service_healthy
+#      redis:
+#        condition: service_healthy
+#      nacos:
+#        condition: service_started
+
+
+volumes:
+  mysql_data:
+  redis_data:
+
+networks:
+  app-network:
+    driver: bridge

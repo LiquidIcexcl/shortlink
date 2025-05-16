@@ -1,0 +1,114 @@
+version: '3.8'
+
+services:
+  # MySQL服务
+  mysql:
+    image: mysql:5.7.36
+    container_name: mysql
+    environment:
+      MYSQL_DATABASE: shortlink_rebuild
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_ROOT_HOST: '%'
+    volumes:
+      - ./mysql/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./mysql/init_admin.sql:/docker-entrypoint-initdb.d/init_admin.sql
+      - mysql_data:/var/lib/mysql
+    networks:
+      - app-network
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 10s
+      retries: 5
+
+  # Redis服务
+  redis:
+    image: redis:6.2-alpine
+    container_name: redis
+    command: redis-server --requirepass 123456
+    volumes:
+      - redis_data:/data
+    networks:
+      - app-network
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Nacos服务
+  nacos:
+    image: nacos/nacos-server:v2.1.2
+    container_name: nacos2
+    environment:
+      MODE: standalone
+      TIME_ZONE: Asia/Shanghai
+    networks:
+      - app-network
+    ports:
+      - "8848:8848"
+      - "9848:9848"
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  # Spring Boot应用
+  gateway:
+    build:
+      context: .
+      dockerfile: app/gateway/Dockerfile
+    environment: # 新增环境变量
+      SPRING_PROFILES_ACTIVE: prod
+      SPRING_CLOUD_NACOS_SERVER-ADDR: nacos2:8848
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/shortlink_rebuild?useSSL=false
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: root
+      SPRING_REDIS_HOST: redis
+      SPRING_REDIS_PASSWORD: 123456
+    ports:
+      - "8000:8000"
+    networks:
+      - app-network
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nacos:
+        condition: service_started
+
+  aggregate:
+    build:
+      context: .
+      dockerfile: app/aggregate/Dockerfile  # 方案二路径
+    environment: # 新增环境变量
+      SPRING_PROFILES_ACTIVE: prod
+      SPRING_CLOUD_NACOS_SERVER-ADDR: nacos2:8848
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/shortlink_rebuild?useSSL=false
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: root
+      SPRING_REDIS_HOST: redis
+      SPRING_REDIS_PASSWORD: 123456
+    ports:
+      - "8003:8003"
+    networks:
+      - app-network
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nacos:
+        condition: service_started
+
+volumes:
+  mysql_data:
+  redis_data:
+
+networks:
+  app-network:
+    driver: bridge
